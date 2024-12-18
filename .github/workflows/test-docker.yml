@@ -30,13 +30,41 @@ jobs:
           load: true
           tags: test-anvil-zksync:latest
 
-      - name: Run tests against Docker image
+      - name: Run e2e tests in Docker container
         run: |
-          echo "Running tests against the built Docker image..."
-          docker run --rm -d --name test_anvil_zksync test-anvil-zksync:latest
-          docker exec test_anvil_zksync make test-e2e || (docker stop test_anvil_zksync && exit 1)
-          docker stop test_anvil_zksync
+          echo "Starting Docker container with test-anvil-zksync image..."
+          docker run --rm -d -p 8011:8011 --name test_anvil_zksync test-anvil-zksync:latest
 
+          echo "Waiting for the node to be ready..."
+          MAX_RETRIES=10
+          COUNTER=0
+          URL="http://localhost:8011"
+          DATA='{"jsonrpc": "2.0", "id": "1", "method": "eth_chainId", "params": []}'
+
+          while [ $COUNTER -lt $MAX_RETRIES ]; do
+              RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "content-type: application/json" -d "$DATA" $URL || true)
+              if [ "$RESPONSE" -eq 200 ]; then
+                  echo "Node is running! Starting e2e tests..."
+                  break
+              else
+                  echo "Node not ready, retrying in 1 second..."
+                  COUNTER=$((COUNTER + 1))
+                  sleep 1
+              fi
+          done
+
+          if [ $COUNTER -eq $MAX_RETRIES ]; then
+              echo "Failed to contact node after $MAX_RETRIES attempts. Are you sure the node is running at $URL ?"
+              docker stop test_anvil_zksync
+              exit 1
+          fi
+
+          echo "Installing dependencies and running tests..."
+          docker exec test_anvil_zksync bash -c "cd /app/e2e-tests && yarn install --frozen-lockfile && yarn hardhat compile && yarn test"
+
+          echo "Stopping Docker container..."
+          docker stop test_anvil_zksync
+          
       - name: Print test result summary
         run: |
           echo "Tests completed successfully!"
