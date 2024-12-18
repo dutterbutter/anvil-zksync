@@ -1,0 +1,42 @@
+name: Test Docker image
+
+on:
+  workflow_call:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  pull_request:
+
+jobs:
+  test-docker-image:
+    name: Test Docker Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image without pushing
+        id: docker_build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: test-anvil-zksync:latest
+
+      - name: Run tests against Docker image
+        run: |
+          echo "Running tests against the built Docker image..."
+          docker run --rm -d --name test_anvil_zksync test-anvil-zksync:latest
+          # Replace below commands with your actual test commands
+          docker exec test_anvil_zksync make test-e2e
+          docker stop test_anvil_zksync
+
+      - name: Print test result summary
+        run: |
+          echo "Tests completed successfully!"
