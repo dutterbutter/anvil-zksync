@@ -27,13 +27,13 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: test-anvil-zksync:latest
 
       - name: Run tests against Docker image
         run: |
           echo "Running tests against the built Docker image..."
           docker run --rm -d --name test_anvil_zksync test-anvil-zksync:latest
-          # Replace below commands with your actual test commands
           docker exec test_anvil_zksync make test-e2e || (docker stop test_anvil_zksync && exit 1)
           docker stop test_anvil_zksync
 
