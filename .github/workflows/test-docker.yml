@@ -30,6 +30,11 @@ jobs:
           load: true
           tags: test-anvil-zksync:latest
 
+      - name: Ensure logs directory and file exist
+        run: |
+          mkdir -p $PWD/logs
+          touch $PWD/logs/anvil-zksync.log
+
       - name: Start Docker container
         run: |
           echo "Starting Docker container with test-anvil-zksync image..."
