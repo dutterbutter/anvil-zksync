@@ -30,18 +30,28 @@ jobs:
         id: set_tag
         run: |
           ts=$(date +%s%N | cut -b1-13)
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            TARGET_BRANCH="${{ github.event.pull_request.base.ref }}"
+            if [[ "$TARGET_BRANCH" == "main" || "$TARGET_BRANCH" == "db/test-docker" ]]; then
+              sha_short=$(git rev-parse --short HEAD)
+              echo "base_tag=${sha_short}-${ts}" >> $GITHUB_OUTPUT
+            else
+              echo "base_tag=none" >> $GITHUB_OUTPUT
+            fi
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "base_tag=${{ steps.git_sha.outputs.sha_short }}-${ts}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/db/test-docker" ]]; then
             echo "base_tag=${{ steps.git_sha.outputs.sha_short }}-${ts}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "base_tag=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "base_tag=none" >> $GITHUB_OUTPUT
           else
-            echo "Unsupported event ${GITHUB_EVENT_NAME} or ref ${GITHUB_REF}. Only refs/heads/, refs/tags/, and pull_request are supported."
-            exit 1
+            echo "base_tag=none" >> $GITHUB_OUTPUT
           fi
+
+      # Optional: Debugging Step
+      - name: Debug Base Tag
+        run: |
+          echo "Determined base_tag: ${{ steps.set_tag.outputs.base_tag }}" >> $GITHUB_STEP_SUMMARY
 
   # 2. Build and Push Docker Images for Each Architecture
   build-push-image:
@@ -74,7 +84,6 @@ jobs:
           fi
           full_tags="${base_tag}-${arch}"
           echo "tags=${full_tags}" >> $GITHUB_OUTPUT
-
       
       # - name: Login to GAR
       #   run: |
@@ -109,7 +118,9 @@ jobs:
   # 3. Create and Push Docker Manifest
   create-manifest:
     name: Create and Push Docker Manifest
-    needs: build-push-image
+    needs: 
+      - set-tags
+      - build-push-image
     runs-on: buildjet-16vcpu-ubuntu-2204
     if: needs.set-tags.outputs.base_tag != 'none'
     steps:
