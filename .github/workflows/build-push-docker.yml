@@ -58,6 +58,9 @@ jobs:
       - name: Set Base Docker Tag
         run: echo "BASE_TAG=${{ needs.set-tags.outputs.base_tag }}" >> $GITHUB_ENV
 
+      - name: Set Repository Owner
+        run: echo "REPO_OWNER=${{ github.repository_owner }}" >> $GITHUB_ENV
+
       - name: Set Full Docker Tags
         id: full_tags
         run: |
@@ -71,8 +74,6 @@ jobs:
           full_tags="ghcr.io/${repo_owner}/anvil-zksync:${base_tag}-${arch}"
           echo "tags=${full_tags}" >> $GITHUB_OUTPUT
 
-
-      
       # - name: Login to GAR
       #   run: |
       #     gcloud auth configure-docker us-docker.pkg.dev -q
