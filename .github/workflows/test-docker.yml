@@ -40,7 +40,6 @@ jobs:
           echo "Starting Docker container with test-anvil-zksync image..."
           docker run --rm -d -p 8011:8011 -v $PWD/logs:/logs --name test_anvil_zksync test-anvil-zksync:latest
 
-
       - name: Wait for the node to be ready
         run: |
           echo "Waiting for the node to be ready..."
@@ -78,7 +77,7 @@ jobs:
         run: |
           echo "Compiling contracts and running e2e tests..."
           yarn hardhat compile
-          export ANVIL_LOG_PATH=/logs/anvil-zksync.log
+          export ANVIL_LOG_PATH="${PWD}/logs/anvil-zksync.log"
           yarn test
 
       - name: Stop Docker container
