@@ -15,6 +15,9 @@ jobs:
   build-push-image:
     name: Build and push Docker image
     runs-on: [buildjet-16vcpu-ubuntu-2204]
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
     steps:
       - uses: actions/checkout@v4
 
@@ -60,7 +63,7 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/anvil-zksync:${{ steps.docker_tag.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/anvil-zksync:latest

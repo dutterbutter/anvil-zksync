@@ -6,6 +6,7 @@ import { ethers } from "hardhat";
 import { Deployer } from "@matterlabs/hardhat-zksync-deploy";
 import * as hre from "hardhat";
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 const provider = getTestProvider();
 
