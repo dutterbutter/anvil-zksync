@@ -63,12 +63,14 @@ jobs:
         run: |
           base_tag="${{ env.BASE_TAG }}"
           arch="${{ matrix.arch }}"
+          repo_owner="${{ env.REPO_OWNER }}"
           if [[ "$base_tag" == "none" ]]; then
             echo "tags=none" >> $GITHUB_OUTPUT
             exit 0
           fi
-          full_tags="${base_tag}-${arch}"
+          full_tags="ghcr.io/${repo_owner}/anvil-zksync:${base_tag}-${arch}"
           echo "tags=${full_tags}" >> $GITHUB_OUTPUT
+
 
       
       # - name: Login to GAR
