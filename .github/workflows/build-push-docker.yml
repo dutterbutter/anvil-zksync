@@ -107,7 +107,9 @@ jobs:
   # 3. Create and Push Docker Manifest
   create-manifest:
     name: Create and Push Docker Manifest
-    needs: build-push-image
+    needs: 
+      - build-push-image
+      - set-tags
     runs-on: buildjet-16vcpu-ubuntu-2204
     if: needs.set-tags.outputs.base_tag != 'none'
     steps:
