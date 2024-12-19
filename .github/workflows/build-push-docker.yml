@@ -1,62 +1,156 @@
-name: Build and push Docker image
+name: Build and push Docker images
 on:
   push:
     branches:
       - main
+      - db/test-docker
     tags:
       - "*"
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-push-image:
-    name: Build and push Docker image
-    runs-on: [matterlabs-ci-runner]
+  # 1. Set Docker Tags
+  set-tags:
+    name: Set Docker Tags
+    runs-on: ubuntu-latest
+    outputs:
+      base_tag: ${{ steps.set_tag.outputs.base_tag }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set git SHA
+      - name: Set Git SHA
         id: git_sha
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Set Docker tag
-        id: docker_tag
+      - name: Determine Base Tag
+        id: set_tag
         run: |
           ts=$(date +%s%N | cut -b1-13)
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "tag=${{ steps.git_sha.outputs.sha_short }}-${ts}" >> $GITHUB_OUTPUT
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            TARGET_BRANCH="${{ github.event.pull_request.base.ref }}"
+            if [[ "$TARGET_BRANCH" == "main" || "$TARGET_BRANCH" == "db/test-docker" ]]; then
+              sha_short=$(git rev-parse --short HEAD)
+              echo "base_tag=${sha_short}-${ts}" >> $GITHUB_OUTPUT
+            else
+              echo "base_tag=none" >> $GITHUB_OUTPUT
+            fi
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "base_tag=${{ steps.git_sha.outputs.sha_short }}-${ts}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/db/test-docker" ]]; then
+            echo "base_tag=${{ steps.git_sha.outputs.sha_short }}-${ts}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "tag=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "tag=none" >> $GITHUB_OUTPUT
+            echo "base_tag=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
           else
-            echo "Unsupported event ${GITHUB_EVENT_NAME} or ref ${GITHUB_REF}, only refs/heads/, refs/tags/ and pull_request are supported."
-            exit 1
+            echo "base_tag=none" >> $GITHUB_OUTPUT
           fi
 
-      - name: Login to GAR
+      # Optional: Debugging Step
+      - name: Debug Base Tag
         run: |
-          gcloud auth configure-docker us-docker.pkg.dev -q
+          echo "Determined base_tag: ${{ steps.set_tag.outputs.base_tag }}" >> $GITHUB_STEP_SUMMARY
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+  # 2. Build and Push Docker Images for Each Architecture
+  build-push-image:
+    name: Build and Push Docker Image for ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    needs: set-tags
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: buildjet-16vcpu-ubuntu-2204
+          - platform: linux/arm64
+            arch: arm64
+            runner: buildjet-16vcpu-ubuntu-2204-arm
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
+      - name: Set Base Docker Tag
+        run: echo "BASE_TAG=${{ needs.set-tags.outputs.base_tag }}" >> $GITHUB_ENV
+
+      - name: Set Full Docker Tags
+        id: full_tags
+        run: |
+          base_tag="${{ env.BASE_TAG }}"
+          arch="${{ matrix.arch }}"
+          if [[ "$base_tag" == "none" ]]; then
+            echo "tags=none" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          full_tags="${base_tag}-${arch}"
+          echo "tags=${full_tags}" >> $GITHUB_OUTPUT
+      
+      # - name: Login to GAR
+      #   run: |
+      #     gcloud auth configure-docker us-docker.pkg.dev -q
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # For now, we're only pushing to the internal registry
-      - name: Build and push Docker image
+      - name: Build and Push Docker Image
         id: docker_build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-          tags: |
-            us-docker.pkg.dev/matterlabs-infra/matterlabs-docker/era-test-node:${{ steps.docker_tag.outputs.tag }}
-            us-docker.pkg.dev/matterlabs-infra/matterlabs-docker/era-test-node:latest
+          push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/db/test-docker' || startsWith(github.ref, 'refs/tags/')) }}
+          platforms: ${{ matrix.platform }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ steps.full_tags.outputs.tags }}
 
-      - name: Print image digest to summary
+      - name: Print Image Tags to Summary
+        if: steps.full_tags.outputs.tags != 'none'
         run: |
-          echo "Image tag: ${{ steps.docker_tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "Image tags: ${{ steps.full_tags.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+
+  # 3. Create and Push Docker Manifest
+  create-manifest:
+    name: Create and Push Docker Manifest
+    needs: 
+      - set-tags
+      - build-push-image
+    runs-on: buildjet-16vcpu-ubuntu-2204
+    if: needs.set-tags.outputs.base_tag != 'none'
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set Base Docker Tag
+        run: echo "BASE_TAG=${{ needs.set-tags.outputs.base_tag }}" >> $GITHUB_ENV
+
+      - name: Set Repository Owner
+        run: echo "REPO_OWNER=${{ github.repository_owner }}" >> $GITHUB_ENV
+
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create and Push Docker Manifest
+        run: |
+          docker buildx imagetools create \
+            ghcr.io/${{ env.REPO_OWNER }}/anvil-zksync:${{ env.BASE_TAG }}-amd64 \
+            ghcr.io/${{ env.REPO_OWNER }}/anvil-zksync:${{ env.BASE_TAG }}-arm64 \
+            --tag ghcr.io/${{ env.REPO_OWNER }}/anvil-zksync:${{ env.BASE_TAG }} \
+            --tag ghcr.io/${{ env.REPO_OWNER }}/anvil-zksync:latest
+          
+          docker buildx imagetools push ghcr.io/${{ env.REPO_OWNER }}/anvil-zksync:${{ env.BASE_TAG }}
+          docker buildx imagetools push ghcr.io/${{ env.REPO_OWNER }}/anvil-zksync:latest
+
+      - name: Print Manifest Tags to Summary
+        run: |
+          echo "Manifest tags: ${{ needs.set-tags.outputs.base_tag }}, latest" >> $GITHUB_STEP_SUMMARY
