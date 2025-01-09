@@ -43,7 +43,7 @@
             - arch: x86_64-unknown-linux-gnu
               platform: buildjet-16vcpu-ubuntu-2204
             - arch: aarch64-unknown-linux-gnu
-              platform: buildjet-16vcpu-ubuntu-2204
+              platform: buildjet-16vcpu-ubuntu-2204-arm
             - arch: x86_64-apple-darwin
               platform: macos-latest
             - arch: aarch64-apple-darwin
