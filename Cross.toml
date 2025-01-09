@@ -1,4 +1,5 @@
 [target.x86_64-unknown-linux-gnu]
+image = "ubuntu:22.04"
 pre-build = [
     "export DEBIAN_FRONTEND=noninteractive",
     "export TZ=Etc/UTC",
@@ -11,8 +12,9 @@ pre-build = [
 ]
 
 [target.aarch64-unknown-linux-gnu]
+image = "ubuntu:22.04"
 pre-build = [
     "export DEBIAN_FRONTEND=noninteractive",
     "dpkg --add-architecture $CROSS_DEB_ARCH",
-    "apt-get update -q && apt-get install --assume-yes --no-install-recommends libssl-dev:$CROSS_DEB_ARCH pkg-config",
+    "apt-get update -q && apt-get install --assume-yes --no-install-recommends libssl-dev:$CROSS_DEB_ARCH pkg-config g++-aarch64-linux-gnu libc6-dev-arm64-cross",
 ]
