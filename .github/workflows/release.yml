@@ -79,15 +79,11 @@
           env:
             OPENSSL_STATIC: 1
           run: |
-            if [[ "${{ matrix.arch }}" == "aarch64-unknown-linux-gnu" ]]; then
-              export OPENSSL_DIR=/usr/lib/aarch64-linux-gnu
-              make build-static-${{ matrix.arch }}
-            elif [[ "${{ matrix.arch }}" == *"linux"* ]]; then
+            if [[ "${{ matrix.arch }}" == *"linux"* ]]; then
               make build-static-${{ matrix.arch }}
             else
               make build-${{ matrix.arch }}
             fi
-
 
         - name: Rename and move binary
           run: |
