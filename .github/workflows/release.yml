@@ -76,15 +76,9 @@ jobs:
           cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.4
 
       - name: Build anvil-zksync for ${{ matrix.arch }}
-        run: |
-          if [[ "${{ matrix.arch }}" == *"linux"* ]]; then
-            OPENSSL_STATIC=1 make build-static-${{ matrix.arch }}
-          else
-            make build-${{ matrix.arch }}
-          fi
+        run: make build-${{ matrix.arch }}
 
-      - name: Test static binary
-        if: matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu'
+      - name: Test binary
         run: |
           file ./target/${{ matrix.arch }}/release/anvil-zksync
           ./target/${{ matrix.arch }}/release/anvil-zksync --version
