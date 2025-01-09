@@ -78,7 +78,7 @@ jobs:
       - name: Build anvil-zksync for ${{ matrix.arch }}
         run: |
           if [[ "${{ matrix.arch }}" == *"linux"* ]]; then
-            make build-static-${{ matrix.arch }}
+            OPENSSL_STATIC=1 make build-static-${{ matrix.arch }}
           else
             make build-${{ matrix.arch }}
           fi
