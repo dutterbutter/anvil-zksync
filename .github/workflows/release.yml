@@ -41,9 +41,9 @@
             ]
           include:
             - arch: x86_64-unknown-linux-gnu
-              platform: buildjet-16vcpu-ubuntu-2204
+              platform: ubuntu-24.04
             - arch: aarch64-unknown-linux-gnu
-              platform: buildjet-16vcpu-ubuntu-2204
+              platform: ubuntu-24.04
             - arch: x86_64-apple-darwin
               platform: macos-latest
             - arch: aarch64-apple-darwin
@@ -76,12 +76,7 @@
             cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.4
 
         - name: Build anvil-zksync for ${{ matrix.arch }}
-          run: |
-            if [[ "${{ matrix.arch }}" == *"linux"* ]]; then
-              make build-static-${{ matrix.arch }}
-            else
-              make build-${{ matrix.arch }}
-            fi
+          run: make build-static-${{ matrix.arch }}
 
         - name: Rename and move binary
           run: |
