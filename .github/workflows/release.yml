@@ -80,7 +80,7 @@
             if [[ "${{ matrix.arch }}" == *"linux"* ]]; then
               make build-linux-static-${{ matrix.arch }}
             else
-              make build-macos-static-${{ matrix.arch }}
+              make build-${{ matrix.arch }}
             fi
 
         - name: Rename and move binary
