@@ -78,9 +78,9 @@
         - name: Build anvil-zksync for ${{ matrix.arch }}
           run: |
             if [[ "${{ matrix.arch }}" == *"linux"* ]]; then
-              make build-static-${{ matrix.arch }}
+              make build-linux-static-${{ matrix.arch }}
             else
-              make build-${{ matrix.arch }}
+              make build-macos-static-${{ matrix.arch }}
             fi
 
         - name: Rename and move binary
