@@ -76,7 +76,12 @@
             cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.4
 
         - name: Build anvil-zksync for ${{ matrix.arch }}
-          run: make build-static-${{ matrix.arch }}
+          run:  
+            if [[ "${{ matrix.arch }}" == *"linux"* ]]; then
+              make build-linux-static-${{ matrix.arch }}
+            else
+              make build-macos-static-${{ matrix.arch }}
+            fi
 
         - name: Rename and move binary
           run: |
