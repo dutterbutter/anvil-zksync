@@ -1,75 +1,92 @@
 name: Bump Homebrew formula
 
 on:
-  release:
-    types: [published]
+  pull_request:
+    branches: main
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.6.0)"
+        required: true
 
 jobs:
   bump-formula:
+    # if: startsWith(github.event.release.tag_name, 'v') &&
+    #     !contains(github.event.release.tag_name, '-')      # skip RCs / prereleases
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    # only run on stable semver tags (v1.2.3, not v1.2.3-rc, or pre-releases)
-    if: startsWith(github.event.release.tag_name, 'v') && !contains(github.event.release.tag_name, '-')
-    runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.RELEASE_TOKEN }}
 
-      - name: Set up version
-        run: |
-            TAG=${{ github.event.release.tag_name }}
-            VER=${TAG#v}
-            echo "TAG=$TAG" >> $GITHUB_ENV
-            echo "VER=$VER" >> $GITHUB_ENV
+    - name: Set up version vars
+      run: |
+        TAG=${{ github.event.release.tag_name }}
+        echo "TAG=$TAG" >> $GITHUB_ENV
+        echo "VER=${TAG#v}" >> $GITHUB_ENV
 
-      - name: Download tarballs & compute checksums
-        run: |
-            arches=(
-                aarch64-apple-darwin
-                x86_64-apple-darwin
-                aarch64-unknown-linux-gnu
-                x86_64-unknown-linux-gnu
-            )
+    - name: Download artifacts & compute checksums
+      id: calc
+      run: |
+        set -euo pipefail
 
-            for arch in "${arches[@]}"; do
-                url="https://github.com/matter-labs/anvil-zksync/releases/download/v${VER}/anvil-zksync-v${VER}-${arch}.tar.gz"
-                sha=$(curl -sL "$url" | sha256sum | awk '{print $1}')
-                varname="SHA_${arch//[-]/_}"
-                echo "$varname=$sha" >> $GITHUB_ENV
-            done
+        declare -A ARCHES=(
+          [aarch64-apple-darwin]=SHA_DARWIN_ARM
+          [x86_64-apple-darwin]=SHA_DARWIN_AMD
+          [aarch64-unknown-linux-gnu]=SHA_LINUX_ARM
+          [x86_64-unknown-linux-gnu]=SHA_LINUX_AMD
+        )
 
-      - name: Patch Formula/anvil-zksync.rb
-        run: |
-            sed -i -E "s|version \".*\"|version \"${VER}\"|" Formula/anvil-zksync.rb
+        for ARCH in "${!ARCHES[@]}"; do
+          FILE="anvil-zksync-v${VER}-${ARCH}.tar.gz"
+          URL="https://github.com/dutterbutter/anvil-zksync/releases/download/v${VER}/${FILE}"
 
-            declare -A checksums=(
-                ["aarch64-apple-darwin"]="${SHA_aarch64_apple_darwin}"
-                ["x86_64-apple-darwin"]="${SHA_x86_64_apple_darwin}"
-                ["aarch64-unknown-linux-gnu"]="${SHA_aarch64_unknown_linux_gnu}"
-                ["x86_64-unknown-linux-gnu"]="${SHA_x86_64_unknown_linux_gnu}"
-            )
-            
-            for arch in "${!checksums[@]}"; do
-                sha="${checksums[$arch]}"
-                sed -i -E "/${arch}\.tar\.gz\"/{
-                    n
-                    s|sha256 \".*\"|sha256 \"${sha}\"|
-                }" Formula/anvil-zksync.rb
-            done
+          TMP=$(mktemp)
+          echo "::group::Downloading $FILE"
+          curl --fail --location --silent --show-error -o "$TMP" "$URL"
+          echo "::endgroup::"
 
-            git add Formula/anvil-zksync.rb
-    
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.RELEASE_TOKEN }}
-          commit-message: 'chore: bump homebrew formula to ${{ env.VER }}'
-          title: 'chore: bump homebrew formula to ${{ env.VER }}'
-          body: |
-            Bump Homebrew formula for anvil-zksync to version ${{ env.VER }}
-            SHA256 checksums updated for all architectures.
-          branch: bump-homebrew-${{ env.VER }}
-          base: ${{ github.event.repository.default_branch }}
-          add-paths: Formula/anvil-zksync.rb
+          SIZE=$(stat -c%s "$TMP")
+          if [[ $SIZE -lt 1000000 ]]; then
+            echo "::error ::$FILE looks too small ($SIZE bytes). Aborting."; exit 1
+          fi
+
+          SHA=$(sha256sum "$TMP" | awk '{print $1}')
+          echo "${ARCHES[$ARCH]}=$SHA" >> $GITHUB_ENV
+          rm "$TMP"
+        done
+
+    - name: Patch Formula/anvil-zksync.rb
+      run: |
+        sed -i -E "s|^ *version \".*\"|  version \"${VER}\"|" Formula/anvil-zksync.rb
+
+        # Helper to drop new SHA into the correct stanza
+        set_formula_sha() {
+          local arch="$1"; local sha="$2"
+          sed -i -E "/${arch//\./\\.}.*\.tar\.gz\"/{n;s|sha256 \".*\"|sha256 \"${sha}\"|}" Formula/anvil-zksync.rb
+        }
+
+        set_formula_sha aarch64-apple-darwin  "$SHA_DARWIN_ARM"
+        set_formula_sha x86_64-apple-darwin   "$SHA_DARWIN_AMD"
+        set_formula_sha aarch64-unknown-linux-gnu "$SHA_LINUX_ARM"
+        set_formula_sha x86_64-unknown-linux-gnu  "$SHA_LINUX_AMD"
+
+        git add Formula/anvil-zksync.rb
+
+    - name: Create pull request
+      uses: peter-evans/create-pull-request@v7
+      with:
+        token:           ${{ secrets.RELEASE_TOKEN }}
+        commit-message:  "chore: bump homebrew formula to ${{ env.VER }}"
+        title:           "chore: bump homebrew formula to ${{ env.VER }}"
+        body: |
+          Bump Homebrew formula for **anvil-zksync** to **${{ env.VER }}**.
+          SHA-256 checksums refreshed for all supported architectures.
+        branch: bump-homebrew-${{ env.VER }}
+        base:   ${{ github.event.repository.default_branch }}
+        add-paths: Formula/anvil-zksync.rb
