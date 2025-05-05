@@ -26,7 +26,7 @@ jobs:
 
     - name: Set up version vars
       run: |
-        TAG=${{ github.event.release.tag_name }}
+        TAG=v0.6.1
         echo "TAG=$TAG" >> $GITHUB_ENV
         echo "VER=${TAG#v}" >> $GITHUB_ENV
 
