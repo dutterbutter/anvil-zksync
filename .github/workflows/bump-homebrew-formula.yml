@@ -81,7 +81,7 @@ jobs:
     - name: Create pull request
       uses: peter-evans/create-pull-request@v7
       with:
-        token:           ${{ secrets.RELEASE_TOKEN }}
+        token:           ${{ secrets.GITHUB_TOKEN }}
         commit-message:  "chore: bump homebrew formula to ${{ env.VER }}"
         title:           "chore: bump homebrew formula to ${{ env.VER }}"
         body: |
