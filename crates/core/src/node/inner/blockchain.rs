@@ -159,6 +159,21 @@ pub trait ReadBlockchain: Send + Sync + Debug {
         batch_number: L1BatchNumber,
     ) -> Option<Vec<StateDiffRecord>>;
 
+    /// Update L1 transaction hashes for a batch.
+    async fn update_l1_batch_tx_hashes(
+        &self,
+        batch_number: L1BatchNumber,
+        commit_tx_hash: Option<H256>,
+        prove_tx_hash: Option<H256>,
+        execute_tx_hash: Option<H256>,
+    ) -> bool;
+
+    /// Retrieve L1 transaction hashes for a batch.
+    async fn get_l1_batch_tx_hashes(
+        &self,
+        batch_number: L1BatchNumber,
+    ) -> Option<(Option<H256>, Option<H256>, Option<H256>)>;
+
     /// Retrieve batch aggregation root by its number.
     async fn get_batch_aggregation_root(&self, batch_number: L1BatchNumber) -> Option<H256>;
 
@@ -533,6 +548,46 @@ impl ReadBlockchain for Blockchain {
         .await
     }
 
+    async fn update_l1_batch_tx_hashes(
+        &self,
+        batch_number: L1BatchNumber,
+        commit_tx_hash: Option<H256>,
+        prove_tx_hash: Option<H256>,
+        execute_tx_hash: Option<H256>,
+    ) -> bool {
+        let mut inner = self.inner.write().await;
+        if let Some(batch_info) = inner.batches.get_mut(&batch_number) {
+            if commit_tx_hash.is_some() {
+                batch_info.commit_tx_hash = commit_tx_hash;
+            }
+            if prove_tx_hash.is_some() {
+                batch_info.prove_tx_hash = prove_tx_hash;
+            }
+            if execute_tx_hash.is_some() {
+                batch_info.execute_tx_hash = execute_tx_hash;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn get_l1_batch_tx_hashes(
+        &self,
+        batch_number: L1BatchNumber,
+    ) -> Option<(Option<H256>, Option<H256>, Option<H256>)> {
+        self.inspect_batch(
+            &batch_number,
+            |StoredL1BatchInfo {
+                 commit_tx_hash,
+                 prove_tx_hash,
+                 execute_tx_hash,
+                 ..
+             }| (*commit_tx_hash, *prove_tx_hash, *execute_tx_hash),
+        )
+        .await
+    }
+
     async fn get_raw_transaction(&self, tx_hash: H256) -> Option<Bytes> {
         self.inspect_tx(&tx_hash, |TransactionResult { info, .. }| {
             info.tx.raw_bytes.clone()
@@ -591,6 +646,9 @@ impl Blockchain {
                 header: genesis_batch_header,
                 state_diffs: Vec::new(),
                 aggregation_root: H256::zero(),
+                commit_tx_hash: None,
+                prove_tx_hash: None,
+                execute_tx_hash: None,
             };
 
             BlockchainState {
@@ -654,6 +712,12 @@ struct StoredL1BatchInfo {
     header: L1BatchHeader,
     state_diffs: Vec<StateDiffRecord>,
     aggregation_root: H256,
+    /// L1 transaction hash for the commit operation
+    commit_tx_hash: Option<H256>,
+    /// L1 transaction hash for the prove operation
+    prove_tx_hash: Option<H256>,
+    /// L1 transaction hash for the execute operation
+    execute_tx_hash: Option<H256>,
 }
 
 impl BlockchainState {
@@ -787,6 +851,9 @@ impl BlockchainState {
             header,
             state_diffs: finished_l1_batch.state_diffs.unwrap_or_default(),
             aggregation_root,
+            commit_tx_hash: None,
+            prove_tx_hash: None,
+            execute_tx_hash: None,
         };
         self.batches.insert(self.current_batch, batch_info);
         self.tx_results.extend(

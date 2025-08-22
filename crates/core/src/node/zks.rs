@@ -11,7 +11,7 @@ use zksync_types::l2_to_l1_log::{
     L2ToL1Log, LOG_PROOF_SUPPORTED_METADATA_VERSION, l2_to_l1_logs_tree_size,
 };
 use zksync_types::transaction_request::CallRequest;
-use zksync_types::web3::keccak256;
+
 use zksync_types::{Address, H160, H256, L2BlockNumber, Transaction, U256};
 use zksync_web3_decl::error::Web3Error;
 
@@ -205,35 +205,9 @@ impl InMemoryNode {
         let fair_pubdata_price = reader.fee_input_provider.fair_pubdata_price();
         drop(reader);
 
-        // Generate deterministic L1 transaction hashes based on batch data
-        // This provides non-zero values that are consistent for the same batch
-        // Use batch number and timestamp as hash sources
-        let batch_num_bytes = batch_number.0.to_be_bytes();
-        let timestamp_bytes = batch_header.timestamp.to_be_bytes();
-        
-        // Create deterministic commit hash: keccak256(batch_number + timestamp + "commit")
-        let mut commit_input = Vec::new();
-        commit_input.extend_from_slice(&batch_num_bytes);
-        commit_input.extend_from_slice(&timestamp_bytes);
-        commit_input.extend_from_slice(b"commit");
-        let commit_hash_raw = keccak256(&commit_input);
-        let commit_tx_hash = H256::from_slice(&commit_hash_raw);
-        
-        // Create deterministic prove hash: keccak256(batch_number + timestamp + "prove")
-        let mut prove_input = Vec::new();
-        prove_input.extend_from_slice(&batch_num_bytes);
-        prove_input.extend_from_slice(&timestamp_bytes);
-        prove_input.extend_from_slice(b"prove");
-        let prove_hash_raw = keccak256(&prove_input);
-        let prove_tx_hash = H256::from_slice(&prove_hash_raw);
-        
-        // Create deterministic execute hash: keccak256(batch_number + timestamp + "execute")
-        let mut execute_input = Vec::new();
-        execute_input.extend_from_slice(&batch_num_bytes);
-        execute_input.extend_from_slice(&timestamp_bytes);
-        execute_input.extend_from_slice(b"execute");
-        let execute_hash_raw = keccak256(&execute_input);
-        let execute_tx_hash = H256::from_slice(&execute_hash_raw);
+        // Get stored L1 transaction hashes
+        let (commit_tx_hash, prove_tx_hash, execute_tx_hash) = 
+            self.blockchain.get_l1_batch_tx_hashes(batch_number).await.unwrap_or((None, None, None));
 
         // Create timestamps as chrono DateTime
         let timestamp_secs = batch_header.timestamp;
@@ -249,14 +223,14 @@ impl InMemoryNode {
                 l2_tx_count: batch_header.l2_tx_count as usize,
                 root_hash: Some(H256::zero()), // TODO: Find the correct root hash field
                 status: api::BlockStatus::Verified, // For anvil-zksync, batches are considered verified
-                commit_tx_hash: Some(commit_tx_hash),
-                committed_at: Some(datetime),
+                commit_tx_hash,
+                committed_at: if commit_tx_hash.is_some() { Some(datetime) } else { None },
                 commit_chain_id: None,
-                prove_tx_hash: Some(prove_tx_hash),
-                proven_at: Some(datetime),
+                prove_tx_hash,
+                proven_at: if prove_tx_hash.is_some() { Some(datetime) } else { None },
                 prove_chain_id: None,
-                execute_tx_hash: Some(execute_tx_hash),
-                executed_at: Some(datetime),
+                execute_tx_hash,
+                executed_at: if execute_tx_hash.is_some() { Some(datetime) } else { None },
                 execute_chain_id: None,
                 l1_gas_price,
                 l2_fair_gas_price,
@@ -787,5 +761,15 @@ mod tests {
         assert_eq!(result.base.l1_tx_count, 0);
         // L2 tx count should be 0 for genesis batch  
         assert_eq!(result.base.l2_tx_count, 0);
+        
+        // L1 transaction hashes should be None initially (no L1 transactions yet)
+        assert!(result.base.commit_tx_hash.is_none());
+        assert!(result.base.prove_tx_hash.is_none());
+        assert!(result.base.execute_tx_hash.is_none());
+        
+        // Timestamps should also be None when no L1 transactions exist
+        assert!(result.base.committed_at.is_none());
+        assert!(result.base.proven_at.is_none());
+        assert!(result.base.executed_at.is_none());
     }
 }
