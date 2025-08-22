@@ -11,6 +11,7 @@ use zksync_types::l2_to_l1_log::{
     L2ToL1Log, LOG_PROOF_SUPPORTED_METADATA_VERSION, l2_to_l1_logs_tree_size,
 };
 use zksync_types::transaction_request::CallRequest;
+use zksync_types::web3::keccak256;
 use zksync_types::{Address, H160, H256, L2BlockNumber, Transaction, U256};
 use zksync_web3_decl::error::Web3Error;
 
@@ -204,11 +205,35 @@ impl InMemoryNode {
         let fair_pubdata_price = reader.fee_input_provider.fair_pubdata_price();
         drop(reader);
 
-        // For anvil-zksync, we'll use dummy/mock values for L1 transaction hashes
-        // In a real implementation, these would come from L1 blockchain
-        let commit_tx_hash = H256::zero();
-        let prove_tx_hash = H256::zero();
-        let execute_tx_hash = H256::zero();
+        // Generate deterministic L1 transaction hashes based on batch data
+        // This provides non-zero values that are consistent for the same batch
+        // Use batch number and timestamp as hash sources
+        let batch_num_bytes = batch_number.0.to_be_bytes();
+        let timestamp_bytes = batch_header.timestamp.to_be_bytes();
+        
+        // Create deterministic commit hash: keccak256(batch_number + timestamp + "commit")
+        let mut commit_input = Vec::new();
+        commit_input.extend_from_slice(&batch_num_bytes);
+        commit_input.extend_from_slice(&timestamp_bytes);
+        commit_input.extend_from_slice(b"commit");
+        let commit_hash_raw = keccak256(&commit_input);
+        let commit_tx_hash = H256::from_slice(&commit_hash_raw);
+        
+        // Create deterministic prove hash: keccak256(batch_number + timestamp + "prove")
+        let mut prove_input = Vec::new();
+        prove_input.extend_from_slice(&batch_num_bytes);
+        prove_input.extend_from_slice(&timestamp_bytes);
+        prove_input.extend_from_slice(b"prove");
+        let prove_hash_raw = keccak256(&prove_input);
+        let prove_tx_hash = H256::from_slice(&prove_hash_raw);
+        
+        // Create deterministic execute hash: keccak256(batch_number + timestamp + "execute")
+        let mut execute_input = Vec::new();
+        execute_input.extend_from_slice(&batch_num_bytes);
+        execute_input.extend_from_slice(&timestamp_bytes);
+        execute_input.extend_from_slice(b"execute");
+        let execute_hash_raw = keccak256(&execute_input);
+        let execute_tx_hash = H256::from_slice(&execute_hash_raw);
 
         // Create timestamps as chrono DateTime
         let timestamp_secs = batch_header.timestamp;
