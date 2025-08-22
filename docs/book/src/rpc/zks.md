@@ -28,7 +28,7 @@ curl -X POST http://localhost:8011 \
 | [`zks_getBlockDetails`](#zks_getblockdetails)                 | ✓     | Extra zkSync block info |
 | [`zks_getRawBlockTransactions`](#zks_getrawblocktransactions) | ✓     | Raw txs in a block      |
 | `zks_getL1BatchBlockRange`                                    | ✗     | Block range in batch    |
-| `zks_getL1BatchDetails`                                       | ✗     | Batch details           |
+| [`zks_getL1BatchDetails`](#zks_getl1batchdetails)             | ✓     | Batch details           |
 | `zks_L1BatchNumber`                                           | ✗     | Latest L1 batch number  |
 
 ### Proofs
@@ -182,6 +182,14 @@ curl -s -X POST http://localhost:8011 \
   -d '{"jsonrpc":"2.0","id":1,"method":"zks_getTransactionDetails","params":["0x…txHash…"]}'
 ```
 
+### zks_getL1BatchDetails <a id="zks_getl1batchdetails" />
+
+```bash
+curl -s -X POST http://localhost:8011 \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"zks_getL1BatchDetails","params":[1]}'
+```
+
 ### zks_L1ChainId <a id="zks_l1chainid" />
 
 ```bash
@@ -197,7 +205,6 @@ The following methods are not yet implemented and will return `Method not found`
 - `zks_getBatchFeeInput`
 - `zks_getFeeParams`
 - `zks_getL1BatchBlockRange`
-- `zks_getL1BatchDetails`
 - `zks_getL1GasPrice`
 - `zks_getL2ToL1MsgProof`
 - `zks_getMainContract`
