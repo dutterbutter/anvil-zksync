@@ -157,12 +157,14 @@ impl ZksNamespaceServer for ZksNamespace {
             .map_err(RpcErrorAdapter::into)
     }
 
-    #[named]
     async fn get_l1_batch_details(
         &self,
-        _batch: L1BatchNumber,
+        batch: L1BatchNumber,
     ) -> RpcResult<Option<L1BatchDetails>> {
-        rpc_unsupported(function_name!())
+        self.node
+            .get_l1_batch_details_impl(batch)
+            .await
+            .map_err(RpcErrorAdapter::into)
     }
 
     async fn get_bytecode_by_hash(&self, hash: H256) -> RpcResult<Option<Vec<u8>>> {

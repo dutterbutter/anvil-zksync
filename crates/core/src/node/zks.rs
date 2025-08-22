@@ -186,6 +186,70 @@ impl InMemoryNode {
         }))
     }
 
+    pub async fn get_l1_batch_details_impl(
+        &self,
+        batch_number: L1BatchNumber,
+    ) -> anyhow::Result<Option<api::L1BatchDetails>> {
+        let Some(batch_header) = self.blockchain.get_batch_header(batch_number).await else {
+            return Ok(None);
+        };
+
+        // Get system contracts hashes
+        let base_system_contracts_hashes = self.system_contracts.base_system_contracts_hashes();
+
+        // Get gas pricing information
+        let reader = self.inner.read().await;
+        let l2_fair_gas_price = reader.fee_input_provider.fair_l2_gas_price();
+        let (l1_gas_price, _) = reader.fee_input_provider.gas_price_and_gas_per_pubdata();
+        let fair_pubdata_price = reader.fee_input_provider.fair_pubdata_price();
+        drop(reader);
+
+        // For anvil-zksync, we'll use dummy/mock values for L1 transaction hashes
+        // In a real implementation, these would come from L1 blockchain
+        let commit_tx_hash = H256::zero();
+        let prove_tx_hash = H256::zero();
+        let execute_tx_hash = H256::zero();
+
+        // Create timestamps as chrono DateTime
+        let timestamp_secs = batch_header.timestamp;
+        let datetime = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(timestamp_secs);
+        let datetime = chrono::DateTime::<chrono::Utc>::from(datetime);
+
+        // Based on the pattern seen in BlockDetails, L1BatchDetails has both number and base fields
+        let batch_details = api::L1BatchDetails {
+            number: batch_number,
+            base: api::BlockDetailsBase {
+                timestamp: timestamp_secs,
+                l1_tx_count: batch_header.l1_tx_count as usize,
+                l2_tx_count: batch_header.l2_tx_count as usize,
+                root_hash: Some(H256::zero()), // TODO: Find the correct root hash field
+                status: api::BlockStatus::Verified, // For anvil-zksync, batches are considered verified
+                commit_tx_hash: Some(commit_tx_hash),
+                committed_at: Some(datetime),
+                commit_chain_id: None,
+                prove_tx_hash: Some(prove_tx_hash),
+                proven_at: Some(datetime),
+                prove_chain_id: None,
+                execute_tx_hash: Some(execute_tx_hash),
+                executed_at: Some(datetime),
+                execute_chain_id: None,
+                l1_gas_price,
+                l2_fair_gas_price,
+                fair_pubdata_price: Some(fair_pubdata_price),
+                base_system_contracts_hashes,
+                commit_tx_finality: None,
+                prove_tx_finality: None,
+                execute_tx_finality: None,
+                precommit_tx_hash: None,
+                precommit_tx_finality: None,
+                precommitted_at: None,
+                precommit_chain_id: None,
+            },
+        };
+
+        Ok(Some(batch_details))
+    }
+
     pub async fn gas_per_pubdata_impl(&self) -> AnvilNodeResult<U256> {
         let (_, gas_per_pubdata) = self
             .inner
@@ -670,5 +734,33 @@ mod tests {
             .expect("failed to get gas_per_pubdata");
 
         assert_eq!(actual, zksync_types::U256::from(expected));
+    }
+
+    #[tokio::test]
+    async fn test_get_l1_batch_details_local() {
+        let node = InMemoryNode::test(None);
+        
+        // Test with non-existent batch - should return None
+        let result = node
+            .get_l1_batch_details_impl(L1BatchNumber(999))
+            .await
+            .expect("get l1 batch details");
+        assert!(result.is_none());
+
+        // Test with batch 0 (genesis batch) - should exist
+        let result = node
+            .get_l1_batch_details_impl(L1BatchNumber(0))
+            .await
+            .expect("get l1 batch details")
+            .expect("genesis batch should exist");
+
+        // Verify the structure
+        assert_eq!(result.number, L1BatchNumber(0));
+        assert_eq!(result.base.status, api::BlockStatus::Verified);
+        assert!(result.base.timestamp > 0);
+        // L1 tx count should be 0 for genesis batch
+        assert_eq!(result.base.l1_tx_count, 0);
+        // L2 tx count should be 0 for genesis batch  
+        assert_eq!(result.base.l2_tx_count, 0);
     }
 }
