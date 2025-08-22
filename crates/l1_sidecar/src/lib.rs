@@ -37,6 +37,7 @@ struct L1SidecarInner {
     commitment_generator: CommitmentGenerator,
     l1_sender_handle: L1SenderHandle,
     zkstack_config: ZkstackConfig,
+    blockchain: Box<dyn ReadBlockchain>,
 }
 
 impl L1Sidecar {
@@ -53,7 +54,7 @@ impl L1Sidecar {
         anvil_provider: DynProvider,
         auto_execute_l1: bool,
     ) -> anyhow::Result<(Self, L1SidecarRunner)> {
-        let commitment_generator = CommitmentGenerator::new(&zkstack_config, blockchain);
+        let commitment_generator = CommitmentGenerator::new(&zkstack_config, blockchain.dyn_cloned());
         let genesis_with_metadata = commitment_generator
             .get_or_generate_metadata(L1BatchNumber(0))
             .await
@@ -68,7 +69,7 @@ impl L1Sidecar {
         let l1_watcher = L1Watcher::new(&zkstack_config, anvil_provider, pool);
         let protocol_version = zkstack_config.genesis.genesis_protocol_version;
         let l1_executor = if auto_execute_l1 {
-            L1Executor::auto(commitment_generator.clone(), l1_sender_handle.clone())
+            L1Executor::auto(commitment_generator.clone(), l1_sender_handle.clone(), blockchain.dyn_cloned())
         } else {
             L1Executor::manual()
         };
@@ -77,6 +78,7 @@ impl L1Sidecar {
                 commitment_generator,
                 l1_sender_handle,
                 zkstack_config,
+                blockchain: blockchain.dyn_cloned(),
             }),
         };
         let upgrade_handle = tokio::spawn(Self::upgrade(protocol_version, node_handle));
@@ -217,10 +219,20 @@ impl L1Sidecar {
             .get_or_generate_metadata(batch_number)
             .await
             .ok_or_else(|| anyhow::anyhow!("batch #{batch_number} does not exist"))?;
-        inner
+        let commit_hash = inner
             .l1_sender_handle
             .commit_sync(batch_with_metadata)
-            .await
+            .await?;
+        
+        // Store the commit transaction hash
+        inner.blockchain.update_l1_batch_tx_hashes(
+            batch_number,
+            Some(commit_hash),
+            None,
+            None,
+        ).await;
+        
+        Ok(commit_hash)
     }
 
     pub async fn prove_batch(&self, batch_number: L1BatchNumber) -> anyhow::Result<H256> {
@@ -234,7 +246,17 @@ impl L1Sidecar {
             .get_or_generate_metadata(batch_number)
             .await
             .ok_or_else(|| anyhow::anyhow!("batch #{batch_number} does not exist"))?;
-        inner.l1_sender_handle.prove_sync(batch_with_metadata).await
+        let prove_hash = inner.l1_sender_handle.prove_sync(batch_with_metadata).await?;
+        
+        // Store the prove transaction hash
+        inner.blockchain.update_l1_batch_tx_hashes(
+            batch_number,
+            None,
+            Some(prove_hash),
+            None,
+        ).await;
+        
+        Ok(prove_hash)
     }
 
     pub async fn execute_batch(&self, batch_number: L1BatchNumber) -> anyhow::Result<H256> {
@@ -248,10 +270,20 @@ impl L1Sidecar {
             .get_or_generate_metadata(batch_number)
             .await
             .ok_or_else(|| anyhow::anyhow!("batch #{batch_number} does not exist"))?;
-        inner
+        let execute_hash = inner
             .l1_sender_handle
             .execute_sync(batch_with_metadata)
-            .await
+            .await?;
+        
+        // Store the execute transaction hash
+        inner.blockchain.update_l1_batch_tx_hashes(
+            batch_number,
+            None,
+            None,
+            Some(execute_hash),
+        ).await;
+        
+        Ok(execute_hash)
     }
 
     pub fn contracts_config(&self) -> anyhow::Result<&ContractsConfig> {

@@ -772,4 +772,92 @@ mod tests {
         assert!(result.base.proven_at.is_none());
         assert!(result.base.executed_at.is_none());
     }
+
+    #[tokio::test]
+    async fn test_l1_batch_tx_hashes_storage() {
+        // Create a test node
+        let node = InMemoryNode::test(None);
+        
+        // Initially, there should be at least batch 0 (genesis)
+        let batch_number = L1BatchNumber(0);
+        
+        // Check initial state - hashes should be None
+        let initial_hashes = node.blockchain.get_l1_batch_tx_hashes(batch_number).await;
+        assert!(initial_hashes.is_some());
+        let (commit, prove, execute) = initial_hashes.unwrap();
+        assert_eq!(commit, None);
+        assert_eq!(prove, None);
+        assert_eq!(execute, None);
+        
+        // Generate some test hashes
+        let commit_hash = H256::from_slice(&[1u8; 32]);
+        let prove_hash = H256::from_slice(&[2u8; 32]);
+        let execute_hash = H256::from_slice(&[3u8; 32]);
+        
+        // Update the hashes
+        let updated = node.blockchain.update_l1_batch_tx_hashes(
+            batch_number,
+            Some(commit_hash),
+            Some(prove_hash),
+            Some(execute_hash),
+        ).await;
+        assert!(updated, "Should be able to update existing batch");
+        
+        // Retrieve and verify the hashes
+        let stored_hashes = node.blockchain.get_l1_batch_tx_hashes(batch_number).await;
+        assert!(stored_hashes.is_some());
+        let (stored_commit, stored_prove, stored_execute) = stored_hashes.unwrap();
+        assert_eq!(stored_commit, Some(commit_hash));
+        assert_eq!(stored_prove, Some(prove_hash));
+        assert_eq!(stored_execute, Some(execute_hash));
+        
+        // Test that zks_getL1BatchDetails uses these hashes
+        let batch_details = node.get_l1_batch_details_impl(batch_number).await.unwrap();
+        assert!(batch_details.is_some());
+        let details = batch_details.unwrap();
+        assert_eq!(details.base.commit_tx_hash, Some(commit_hash));
+        assert_eq!(details.base.prove_tx_hash, Some(prove_hash));
+        assert_eq!(details.base.execute_tx_hash, Some(execute_hash));
+        
+        // Timestamps should be set when hashes exist
+        assert!(details.base.committed_at.is_some());
+        assert!(details.base.proven_at.is_some());
+        assert!(details.base.executed_at.is_some());
+    }
+    
+    #[tokio::test]
+    async fn test_l1_batch_tx_hashes_partial_update() {
+        let node = InMemoryNode::test(None);
+        
+        let batch_number = L1BatchNumber(0);
+        let commit_hash = H256::from_slice(&[1u8; 32]);
+        
+        // Update only commit hash
+        let updated = node.blockchain.update_l1_batch_tx_hashes(
+            batch_number,
+            Some(commit_hash),
+            None,
+            None,
+        ).await;
+        assert!(updated);
+        
+        // Verify only commit hash is set
+        let stored_hashes = node.blockchain.get_l1_batch_tx_hashes(batch_number).await;
+        assert!(stored_hashes.is_some());
+        let (stored_commit, stored_prove, stored_execute) = stored_hashes.unwrap();
+        assert_eq!(stored_commit, Some(commit_hash));
+        assert_eq!(stored_prove, None);
+        assert_eq!(stored_execute, None);
+        
+        // Test that zks_getL1BatchDetails reflects this
+        let details = node.get_l1_batch_details_impl(batch_number).await.unwrap().unwrap();
+        assert_eq!(details.base.commit_tx_hash, Some(commit_hash));
+        assert_eq!(details.base.prove_tx_hash, None);
+        assert_eq!(details.base.execute_tx_hash, None);
+        
+        // Only committed_at should be set
+        assert!(details.base.committed_at.is_some());
+        assert!(details.base.proven_at.is_none());
+        assert!(details.base.executed_at.is_none());
+    }
 }

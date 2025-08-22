@@ -1,5 +1,6 @@
 use crate::commitment_generator::CommitmentGenerator;
 use crate::l1_sender::L1SenderHandle;
+use anvil_zksync_core::node::blockchain::ReadBlockchain;
 use std::time::Duration;
 use tokio::sync::watch;
 use zksync_types::L1BatchNumber;
@@ -21,12 +22,14 @@ impl L1Executor {
     pub fn auto(
         commitment_generator: CommitmentGenerator,
         l1_sender_handle: L1SenderHandle,
+        blockchain: Box<dyn ReadBlockchain>,
     ) -> Self {
         Self {
             mode: L1ExecutorMode::Auto(L1ExecutorModeAuto {
                 last_executed_batch: L1BatchNumber(0),
                 commitment_generator,
                 l1_sender_handle,
+                blockchain,
             }),
         }
     }
@@ -53,6 +56,7 @@ struct L1ExecutorModeAuto {
     last_executed_batch: L1BatchNumber,
     commitment_generator: CommitmentGenerator,
     l1_sender_handle: L1SenderHandle,
+    blockchain: Box<dyn ReadBlockchain>,
 }
 
 impl L1ExecutorModeAuto {
@@ -76,15 +80,24 @@ impl L1ExecutorModeAuto {
                     .ok();
                 continue;
             };
-            self.l1_sender_handle
+            let commit_hash = self.l1_sender_handle
                 .commit_sync(batch_with_metadata.clone())
                 .await?;
-            self.l1_sender_handle
+            let prove_hash = self.l1_sender_handle
                 .prove_sync(batch_with_metadata.clone())
                 .await?;
-            self.l1_sender_handle
-                .execute_sync(batch_with_metadata)
+            let execute_hash = self.l1_sender_handle
+                .execute_sync(batch_with_metadata.clone())
                 .await?;
+            
+            // Store the L1 transaction hashes in the blockchain
+            self.blockchain.update_l1_batch_tx_hashes(
+                next_batch,
+                Some(commit_hash),
+                Some(prove_hash),
+                Some(execute_hash),
+            ).await;
+            
             tracing::debug!(batch_number=%next_batch, "batch has been automatically executed on L1");
             self.last_executed_batch = next_batch;
         }
