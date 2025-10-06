@@ -596,6 +596,23 @@ impl InMemoryNode {
     pub async fn chain_id(&self) -> L2ChainId {
         self.inner.read().await.chain_id()
     }
+
+    /// Update L1 transaction hashes for a specific batch.
+    /// This method is intended to be called by the L1 sidecar when L1 transactions are executed.
+    pub async fn update_l1_batch_tx_hashes(
+        &self,
+        batch_number: L1BatchNumber,
+        commit_tx_hash: Option<H256>,
+        prove_tx_hash: Option<H256>, 
+        execute_tx_hash: Option<H256>,
+    ) -> AnvilNodeResult<bool> {
+        Ok(self.blockchain.update_l1_batch_tx_hashes(
+            batch_number,
+            commit_tx_hash,
+            prove_tx_hash,
+            execute_tx_hash,
+        ).await)
+    }
 }
 
 pub fn load_last_l1_batch<S: ReadStorage>(storage: StoragePtr<S>) -> Option<(u64, u64)> {

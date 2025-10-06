@@ -11,6 +11,7 @@ use zksync_types::l2_to_l1_log::{
     L2ToL1Log, LOG_PROOF_SUPPORTED_METADATA_VERSION, l2_to_l1_logs_tree_size,
 };
 use zksync_types::transaction_request::CallRequest;
+
 use zksync_types::{Address, H160, H256, L2BlockNumber, Transaction, U256};
 use zksync_web3_decl::error::Web3Error;
 
@@ -184,6 +185,68 @@ impl InMemoryNode {
             root,
             id: l1_log_index as u32,
         }))
+    }
+
+    pub async fn get_l1_batch_details_impl(
+        &self,
+        batch_number: L1BatchNumber,
+    ) -> anyhow::Result<Option<api::L1BatchDetails>> {
+        let Some(batch_header) = self.blockchain.get_batch_header(batch_number).await else {
+            return Ok(None);
+        };
+
+        // Get system contracts hashes
+        let base_system_contracts_hashes = self.system_contracts.base_system_contracts_hashes();
+
+        // Get gas pricing information
+        let reader = self.inner.read().await;
+        let l2_fair_gas_price = reader.fee_input_provider.fair_l2_gas_price();
+        let (l1_gas_price, _) = reader.fee_input_provider.gas_price_and_gas_per_pubdata();
+        let fair_pubdata_price = reader.fee_input_provider.fair_pubdata_price();
+        drop(reader);
+
+        // Get stored L1 transaction hashes
+        let (commit_tx_hash, prove_tx_hash, execute_tx_hash) = 
+            self.blockchain.get_l1_batch_tx_hashes(batch_number).await.unwrap_or((None, None, None));
+
+        // Create timestamps as chrono DateTime
+        let timestamp_secs = batch_header.timestamp;
+        let datetime = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(timestamp_secs);
+        let datetime = chrono::DateTime::<chrono::Utc>::from(datetime);
+
+        // Based on the pattern seen in BlockDetails, L1BatchDetails has both number and base fields
+        let batch_details = api::L1BatchDetails {
+            number: batch_number,
+            base: api::BlockDetailsBase {
+                timestamp: timestamp_secs,
+                l1_tx_count: batch_header.l1_tx_count as usize,
+                l2_tx_count: batch_header.l2_tx_count as usize,
+                root_hash: Some(H256::zero()), // TODO: Find the correct root hash field
+                status: api::BlockStatus::Verified, // For anvil-zksync, batches are considered verified
+                commit_tx_hash,
+                committed_at: if commit_tx_hash.is_some() { Some(datetime) } else { None },
+                commit_chain_id: None,
+                prove_tx_hash,
+                proven_at: if prove_tx_hash.is_some() { Some(datetime) } else { None },
+                prove_chain_id: None,
+                execute_tx_hash,
+                executed_at: if execute_tx_hash.is_some() { Some(datetime) } else { None },
+                execute_chain_id: None,
+                l1_gas_price,
+                l2_fair_gas_price,
+                fair_pubdata_price: Some(fair_pubdata_price),
+                base_system_contracts_hashes,
+                commit_tx_finality: None,
+                prove_tx_finality: None,
+                execute_tx_finality: None,
+                precommit_tx_hash: None,
+                precommit_tx_finality: None,
+                precommitted_at: None,
+                precommit_chain_id: None,
+            },
+        };
+
+        Ok(Some(batch_details))
     }
 
     pub async fn gas_per_pubdata_impl(&self) -> AnvilNodeResult<U256> {
@@ -670,5 +733,131 @@ mod tests {
             .expect("failed to get gas_per_pubdata");
 
         assert_eq!(actual, zksync_types::U256::from(expected));
+    }
+
+    #[tokio::test]
+    async fn test_get_l1_batch_details_local() {
+        let node = InMemoryNode::test(None);
+        
+        // Test with non-existent batch - should return None
+        let result = node
+            .get_l1_batch_details_impl(L1BatchNumber(999))
+            .await
+            .expect("get l1 batch details");
+        assert!(result.is_none());
+
+        // Test with batch 0 (genesis batch) - should exist
+        let result = node
+            .get_l1_batch_details_impl(L1BatchNumber(0))
+            .await
+            .expect("get l1 batch details")
+            .expect("genesis batch should exist");
+
+        // Verify the structure
+        assert_eq!(result.number, L1BatchNumber(0));
+        assert_eq!(result.base.status, api::BlockStatus::Verified);
+        assert!(result.base.timestamp > 0);
+        // L1 tx count should be 0 for genesis batch
+        assert_eq!(result.base.l1_tx_count, 0);
+        // L2 tx count should be 0 for genesis batch  
+        assert_eq!(result.base.l2_tx_count, 0);
+        
+        // L1 transaction hashes should be None initially (no L1 transactions yet)
+        assert!(result.base.commit_tx_hash.is_none());
+        assert!(result.base.prove_tx_hash.is_none());
+        assert!(result.base.execute_tx_hash.is_none());
+        
+        // Timestamps should also be None when no L1 transactions exist
+        assert!(result.base.committed_at.is_none());
+        assert!(result.base.proven_at.is_none());
+        assert!(result.base.executed_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_l1_batch_tx_hashes_storage() {
+        // Create a test node
+        let node = InMemoryNode::test(None);
+        
+        // Initially, there should be at least batch 0 (genesis)
+        let batch_number = L1BatchNumber(0);
+        
+        // Check initial state - hashes should be None
+        let initial_hashes = node.blockchain.get_l1_batch_tx_hashes(batch_number).await;
+        assert!(initial_hashes.is_some());
+        let (commit, prove, execute) = initial_hashes.unwrap();
+        assert_eq!(commit, None);
+        assert_eq!(prove, None);
+        assert_eq!(execute, None);
+        
+        // Generate some test hashes
+        let commit_hash = H256::from_slice(&[1u8; 32]);
+        let prove_hash = H256::from_slice(&[2u8; 32]);
+        let execute_hash = H256::from_slice(&[3u8; 32]);
+        
+        // Update the hashes
+        let updated = node.blockchain.update_l1_batch_tx_hashes(
+            batch_number,
+            Some(commit_hash),
+            Some(prove_hash),
+            Some(execute_hash),
+        ).await;
+        assert!(updated, "Should be able to update existing batch");
+        
+        // Retrieve and verify the hashes
+        let stored_hashes = node.blockchain.get_l1_batch_tx_hashes(batch_number).await;
+        assert!(stored_hashes.is_some());
+        let (stored_commit, stored_prove, stored_execute) = stored_hashes.unwrap();
+        assert_eq!(stored_commit, Some(commit_hash));
+        assert_eq!(stored_prove, Some(prove_hash));
+        assert_eq!(stored_execute, Some(execute_hash));
+        
+        // Test that zks_getL1BatchDetails uses these hashes
+        let batch_details = node.get_l1_batch_details_impl(batch_number).await.unwrap();
+        assert!(batch_details.is_some());
+        let details = batch_details.unwrap();
+        assert_eq!(details.base.commit_tx_hash, Some(commit_hash));
+        assert_eq!(details.base.prove_tx_hash, Some(prove_hash));
+        assert_eq!(details.base.execute_tx_hash, Some(execute_hash));
+        
+        // Timestamps should be set when hashes exist
+        assert!(details.base.committed_at.is_some());
+        assert!(details.base.proven_at.is_some());
+        assert!(details.base.executed_at.is_some());
+    }
+    
+    #[tokio::test]
+    async fn test_l1_batch_tx_hashes_partial_update() {
+        let node = InMemoryNode::test(None);
+        
+        let batch_number = L1BatchNumber(0);
+        let commit_hash = H256::from_slice(&[1u8; 32]);
+        
+        // Update only commit hash
+        let updated = node.blockchain.update_l1_batch_tx_hashes(
+            batch_number,
+            Some(commit_hash),
+            None,
+            None,
+        ).await;
+        assert!(updated);
+        
+        // Verify only commit hash is set
+        let stored_hashes = node.blockchain.get_l1_batch_tx_hashes(batch_number).await;
+        assert!(stored_hashes.is_some());
+        let (stored_commit, stored_prove, stored_execute) = stored_hashes.unwrap();
+        assert_eq!(stored_commit, Some(commit_hash));
+        assert_eq!(stored_prove, None);
+        assert_eq!(stored_execute, None);
+        
+        // Test that zks_getL1BatchDetails reflects this
+        let details = node.get_l1_batch_details_impl(batch_number).await.unwrap().unwrap();
+        assert_eq!(details.base.commit_tx_hash, Some(commit_hash));
+        assert_eq!(details.base.prove_tx_hash, None);
+        assert_eq!(details.base.execute_tx_hash, None);
+        
+        // Only committed_at should be set
+        assert!(details.base.committed_at.is_some());
+        assert!(details.base.proven_at.is_none());
+        assert!(details.base.executed_at.is_none());
     }
 }
